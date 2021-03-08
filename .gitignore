@@ -1,3 +1,6 @@
+*
+!/src
+
 .vagrant
 .DS_Store
 *.d
