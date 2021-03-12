@@ -64,6 +64,8 @@ int sr_read_from_server(struct sr_instance* );
 /* -- sr_router.c -- */
 void sr_init(struct sr_instance* );
 void sr_handlepacket(struct sr_instance* , uint8_t * , unsigned int , char* );
+void sr_send_icmp_t3(struct sr_instance*,uint8_t*,uint8_t,uint8_t,struct sr_if*);
+struct sr_if* longest_prefix_match(struct sr_instance*, uint32_t);
 
 /* Add additional helper method declarations here! -KM */
 

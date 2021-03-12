@@ -18,10 +18,81 @@
 */
 void sr_arpcache_sweepreqs(struct sr_instance *sr) {
     /* fill in code here */
+    struct sr_arpreq* arpP = sr->cache.requests;
+    while(arpP)
+    {
+    /* Since handle_arpreq as defined in the comments above could destroy your
+       current request, make sure to save the next pointer before calling
+       handle_arpreq when traversing through the ARP requests linked list.
+    */
+        handle_arpreq(sr, arpP);
+        /* move the pointer to the next */
+        arpP = arpP->next;
+    }
 }
 
-void handle_arpreq(struct sr_instance *sr, struct sr_arpreq *request) {
+void handle_arpreq(struct sr_instance *sr, struct sr_arpreq *arpreq) {
     /* fill in code here */
+    
+    /* get the current time */
+        time_t now = time(NULL);
+
+        pthread_mutex_lock(&sr->cache.lock);
+
+        /* if the difference is greater than 1 */
+        if(difftime(now, arpreq->sent) > 1.0)
+        {
+            /* if arp has been sent more than 5 times */
+            if(arpreq->times_sent >= 5)
+            {
+                /* loop through all outstanding packet and send out ICMP host unreachable for each packet */
+                struct sr_packet* outstandingP = arpreq->packets;
+                while(outstandingP)
+                {
+                    struct sr_if* iface = sr_get_interface(sr, outstandingP->iface);
+                    sr_send_icmp_t3(sr, outstandingP->buf, 0x03, 0x00, iface);
+                    outstandingP = outstandingP->next;
+                }
+                sr_arpreq_destroy(&sr->cache, arpreq);
+            }
+            /* create a new arp reques and send out */
+            else
+            {
+                uint8_t* arpP = malloc(sizeof(sr_ethernet_hdr_t) + sizeof(sr_arp_hdr_t));
+                sr_ethernet_hdr_t* e_hdr = (sr_ethernet_hdr_t*)arpP;
+                sr_arp_hdr_t* a_hdr = (sr_arp_hdr_t*)(arpP+ sizeof(sr_ethernet_hdr_t));
+
+                struct sr_if* LPM = longest_prefix_match(sr, arpreq->ip);
+                if(LPM == NULL)
+                {
+                    fprintf(stderr, "should not be here in sending arp request\n");
+                    return;
+                }
+
+                e_hdr->ether_type = htons(ethertype_arp);
+                memcpy(e_hdr->ether_dhost, (uint8_t*)"\xff\xff\xff\xff\xff\xff", ETHER_ADDR_LEN);
+                memcpy(e_hdr->ether_shost, LPM->addr, ETHER_ADDR_LEN);
+          
+                /* fill the arp header */
+                a_hdr->ar_hrd = htons(arp_hrd_ethernet);
+                a_hdr->ar_pro = htons(ethertype_ip);
+                a_hdr->ar_hln = ETHER_ADDR_LEN;
+                a_hdr->ar_pln = 4;
+                a_hdr->ar_op = htons(arp_op_request);
+                a_hdr->ar_sip = LPM->ip;
+                a_hdr->ar_tip = arpreq->ip;
+                memcpy(a_hdr->ar_sha, LPM->addr, ETHER_ADDR_LEN);
+                memcpy(a_hdr->ar_tha, (unsigned char*)"\xff\xff\xff\xff\xff\xff", ETHER_ADDR_LEN);
+
+                sr_send_packet(sr, arpP, sizeof(sr_ethernet_hdr_t) + sizeof(sr_arp_hdr_t), LPM->name);
+          
+                /* update arp request time field and times sent field */
+                arpreq->sent = time(NULL);
+                arpreq->times_sent = arpreq->times_sent + 1;
+
+            }
+        }
+        pthread_mutex_unlock(&sr->cache.lock);
 }
 
 /* You should not need to touch the rest of this code. */

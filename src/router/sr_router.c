@@ -90,14 +90,72 @@ void sr_send_icmp_t3(
     icmpHeader->icmp_code = code;
     icmpHeader->icmp_sum = 0;
     memcpy((uint8_t *) icmpHeader + sizeof(sr_icmp_t3_hdr_t) - ICMP_DATA_SIZE, packet, ICMP_DATA_SIZE);
+    icmpHeader->icmp_sum = 0;
     icmpHeader->icmp_sum = cksum(icmpHeader, sizeof(sr_icmp_t3_hdr_t));
 
     sr_send_packet(sr, new_packet, sizeof(sr_ethernet_hdr_t)+sizeof(sr_ip_hdr_t) + sizeof(sr_icmp_t3_hdr_t), interface->name);
+    fprintf(stderr, "ICMP Packet sent.\n");
     /*clean up*/
     free(new_packet);
 }
 
-struct sr_if* longest_prefix_match(struct sr_instance* sr, uint8_t * packet, uint32_t dest_ip){
+struct sr_if* longest_prefix_match(struct sr_instance* sr, uint32_t dest_ip){
+    struct sr_rt *curr_match = 0;
+    struct sr_rt *entry = sr->routing_table;
+    unsigned long longest_mask = 0;
+    
+    while(entry){
+        /*ip matches the entry address*/
+        if (((entry->mask.s_addr & entry->dest.s_addr) == (dest_ip & entry->mask.s_addr))) {
+            /*the mask is longer than the currently matched one*/
+            if (longest_mask <= entry->mask.s_addr) {
+                curr_match = entry;
+                longest_mask = entry->mask.s_addr;
+            }
+        }
+        entry = entry->next;
+    }
+    
+    return sr_get_interface(sr, curr_match->interface);
+}
+
+void handle_ip_forwarding(struct sr_instance* sr,
+                          uint8_t * packet/* lent */,
+                          unsigned int len,
+                          char* interface/* lent */)
+{
+    sr_ethernet_hdr_t *ethernet_header = (sr_ethernet_hdr_t*) packet;
+    sr_ip_hdr_t *ip_header = (sr_ip_hdr_t*) (packet + sizeof(sr_ethernet_hdr_t));
+    struct sr_if* current_interface = sr_get_interface(sr, interface);
+    
+    struct sr_if *matched_interface = longest_prefix_match(sr, ip_header->ip_dst);
+    
+    // No matched entry in routing table
+    if(matched_interface ==NULL ){
+        sr_send_icmp_t3(sr, packet, 0x03, 0x00, current_interface);
+        return;
+    }
+    
+    struct sr_arpentry * entry = sr_arpcache_lookup(&sr->cache, ip_header->ip_dst);
+    
+    // If correspond MAC is in cache
+    if(entry != NULL){
+        memcpy(ethernet_header->ether_shost, matched_interface->addr, ETHER_ADDR_LEN);
+        memcpy(ethernet_header->ether_dhost, entry->mac, ETHER_ADDR_LEN);
+
+        /* since we had decrement the ttl in handle IP, we have to recompute the check sum */
+
+        /* forward the packet to the next hop */
+        sr_send_packet(sr, packet, len, matched_interface->name);
+        free(entry);
+        return;
+    }
+    
+    /* we need to put the packet on the queue */
+    struct sr_arpreq* arpreq = sr_arpcache_queuereq(&sr->cache, ip_header->ip_dst, packet, len, matched_interface->name);
+    /* call handle arp request method */
+    handle_arpreq(sr, arpreq);
+    return;
     
 }
 
@@ -168,6 +226,7 @@ void handle_arp(struct sr_instance* sr,
 
         /*reply the arp request packet*/
         sr_send_packet(sr, request_pointer, sizeof(sr_ethernet_hdr_t)+sizeof(sr_arp_hdr_t), receiving_interface->name);
+        fprintf(stderr, "ARP sent.\n");
     }
 
     /* Handle ARP Reply */
@@ -199,10 +258,12 @@ void handle_arp(struct sr_instance* sr,
             memcpy(e_hdr_new->ether_shost, receiving_interface->addr, ETHER_ADDR_LEN);
 
             /*recompute the checksum of the entire packet*/
+            ip_hdr_new->ip_sum = 0;
             ip_hdr_new->ip_sum = cksum(ip_hdr_new, sizeof(sr_ip_hdr_t));
 
             /*send the outstanding packet*/
             sr_send_packet(sr, queued_p, tmp_pkt->len, receiving_interface->name);
+            fprintf(stderr, "Outstanding packet sent.\n");
 
             /*move the pointer to next entry in the queue*/
             tmp_pkt = tmp_pkt->next;
@@ -218,8 +279,8 @@ void handle_ip(struct sr_instance* sr,
                char* interface/* lent */){
     
     sr_ethernet_hdr_t *ethernet_header = (sr_ethernet_hdr_t*) packet;
-    
     sr_ip_hdr_t *ip_header = (sr_ip_hdr_t*) (packet + sizeof(sr_ethernet_hdr_t));
+    struct sr_if* current_interface = sr_get_interface(sr, interface);
     
     /* Check for valid len */
     if(len < sizeof(sr_ethernet_hdr_t)+sizeof(sr_ip_hdr_t)) {
@@ -227,9 +288,13 @@ void handle_ip(struct sr_instance* sr,
       return;
     }
     
-    uint16_t checksum = cksum(ip_header, sizeof(sr_ip_hdr_t));
+    uint16_t old_check_sum = ip_header->ip_sum;
     
-    if(checksum != ip_header->ip_sum){
+    ip_header->ip_sum = 0;
+    ip_header->ip_sum = cksum(ip_header, sizeof(sr_ip_hdr_t));
+    
+    
+    if(old_check_sum != ip_header->ip_sum){
         fprintf(stderr, "Dropping IP packet: Invalid checksum \n");
         return;
     }
@@ -258,14 +323,28 @@ void handle_ip(struct sr_instance* sr,
         /* Drop if not ICMP 8*/
         if(icmp_header->icmp_type != 0x08)
         {
+            fprintf(stderr, "Dropping IP packet: Not ICMP 8 \n");
             return;
         }
         else {
             sr_send_icmp_t3(sr, packet, 0x00, 0x00, if_i);
+            return;
         }
     }
     
     // Handle the case that the request is not for us
+    if(ip_header->ip_ttl <= 1)
+    {
+      // TTL expired
+      sr_send_icmp_t3(sr, packet, 0x0b, 0x00, current_interface);
+      return;
+    }
+    
+    ip_header->ip_ttl--;
+    ip_header->ip_sum = 0;
+    ip_header->ip_sum = cksum(ip_header, sizeof(sr_ip_hdr_t));
+    
+    handle_ip_forwarding(sr, packet, len, interface);
 }
 
 /*---------------------------------------------------------------------
@@ -305,7 +384,7 @@ void sr_handlepacket(struct sr_instance* sr,
     }
     else if(ethertype(packet) == ethertype_ip) {
         
-        
+        handle_ip(sr, packet, len, interface);
     }
 
 } /* end sr_handlepacket */
