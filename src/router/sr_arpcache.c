@@ -38,7 +38,6 @@ void handle_arpreq(struct sr_instance *sr, struct sr_arpreq *arpreq) {
         return;
     }
 
-
     // Sent for 5 times
     if(arpreq->times_sent >= 5)
     {
@@ -70,7 +69,6 @@ void handle_arpreq(struct sr_instance *sr, struct sr_arpreq *arpreq) {
     memcpy(ethernet_header->ether_dhost, (uint8_t*)"\xff\xff\xff\xff\xff\xff", ETHER_ADDR_LEN);
     memcpy(ethernet_header->ether_shost, matched_interface->addr, ETHER_ADDR_LEN);
 
-    /* fill the arp header */
     arp_header->ar_hrd = htons(arp_hrd_ethernet);
     arp_header->ar_pro = htons(ethertype_ip);
     arp_header->ar_hln = ETHER_ADDR_LEN;
