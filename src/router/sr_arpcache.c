@@ -19,14 +19,12 @@
 void sr_arpcache_sweepreqs(struct sr_instance *sr) {
     /* fill in code here */
     struct sr_arpreq* arp_request = sr->cache.requests;
+    struct sr_arpreq* next_arp_request;
     while(arp_request)
     {
-    /* Since handle_arpreq as defined in the comments above could destroy your
-       current request, make sure to save the next pointer before calling
-       handle_arpreq when traversing through the ARP requests linked list.
-    */
+        next_arp_request = arp_request->next;
         handle_arpreq(sr, arp_request);
-        arp_request = arp_request->next;
+        arp_request = next_arp_request;
     }
 }
 
@@ -40,8 +38,6 @@ void handle_arpreq(struct sr_instance *sr, struct sr_arpreq *arpreq) {
         return;
     }
 
-    pthread_mutex_lock(&sr->cache.lock);
-    
 
     // Sent for 5 times
     if(arpreq->times_sent >= 5)
@@ -54,44 +50,42 @@ void handle_arpreq(struct sr_instance *sr, struct sr_arpreq *arpreq) {
             packet_waiting = packet_waiting->next;
         }
         sr_arpreq_destroy(&sr->cache, arpreq);
+        
+        return;
     }
     // Send a new ARP request
-    else
+
+    uint8_t* arp_packet = malloc(sizeof(sr_ethernet_hdr_t) + sizeof(sr_arp_hdr_t));
+    sr_ethernet_hdr_t* ethernet_header = (sr_ethernet_hdr_t*)arp_packet;
+    sr_arp_hdr_t* arp_header = (sr_arp_hdr_t*)(arp_packet+ sizeof(sr_ethernet_hdr_t));
+
+    struct sr_if* matched_interface = longest_prefix_match(sr, arpreq->ip);
+    if(matched_interface == NULL)
     {
-        uint8_t* arp_packet = malloc(sizeof(sr_ethernet_hdr_t) + sizeof(sr_arp_hdr_t));
-        sr_ethernet_hdr_t* ethernet_header = (sr_ethernet_hdr_t*)arp_packet;
-        sr_arp_hdr_t* arp_header = (sr_arp_hdr_t*)(arp_packet+ sizeof(sr_ethernet_hdr_t));
-
-        struct sr_if* matched_interface = longest_prefix_match(sr, arpreq->ip);
-        if(matched_interface == NULL)
-        {
-            fprintf(stderr, "Missing matched interface \n");
-            pthread_mutex_unlock(&sr->cache.lock);
-            return;
-        }
-
-        ethernet_header->ether_type = htons(ethertype_arp);
-        memcpy(ethernet_header->ether_dhost, (uint8_t*)"\xff\xff\xff\xff\xff\xff", ETHER_ADDR_LEN);
-        memcpy(ethernet_header->ether_shost, matched_interface->addr, ETHER_ADDR_LEN);
-  
-        /* fill the arp header */
-        arp_header->ar_hrd = htons(arp_hrd_ethernet);
-        arp_header->ar_pro = htons(ethertype_ip);
-        arp_header->ar_hln = ETHER_ADDR_LEN;
-        arp_header->ar_pln = 4;
-        arp_header->ar_op = htons(arp_op_request);
-        arp_header->ar_sip = matched_interface->ip;
-        arp_header->ar_tip = arpreq->ip;
-        memcpy(arp_header->ar_sha, matched_interface->addr, ETHER_ADDR_LEN);
-        memcpy(arp_header->ar_tha, (unsigned char*)"\xff\xff\xff\xff\xff\xff", ETHER_ADDR_LEN);
-
-        sr_send_packet(sr, arp_packet, sizeof(sr_ethernet_hdr_t) + sizeof(sr_arp_hdr_t), matched_interface->name);
-  
-        arpreq->sent = time(NULL);
-        arpreq->times_sent = arpreq->times_sent + 1;
-
+        fprintf(stderr, "Missing matched interface \n");
+        return;
     }
-    pthread_mutex_unlock(&sr->cache.lock);
+
+    ethernet_header->ether_type = htons(ethertype_arp);
+    memcpy(ethernet_header->ether_dhost, (uint8_t*)"\xff\xff\xff\xff\xff\xff", ETHER_ADDR_LEN);
+    memcpy(ethernet_header->ether_shost, matched_interface->addr, ETHER_ADDR_LEN);
+
+    /* fill the arp header */
+    arp_header->ar_hrd = htons(arp_hrd_ethernet);
+    arp_header->ar_pro = htons(ethertype_ip);
+    arp_header->ar_hln = ETHER_ADDR_LEN;
+    arp_header->ar_pln = 4;
+    arp_header->ar_op = htons(arp_op_request);
+    arp_header->ar_sip = matched_interface->ip;
+    arp_header->ar_tip = arpreq->ip;
+    memcpy(arp_header->ar_sha, matched_interface->addr, ETHER_ADDR_LEN);
+    memcpy(arp_header->ar_tha, (unsigned char*)"\xff\xff\xff\xff\xff\xff", ETHER_ADDR_LEN);
+
+    sr_send_packet(sr, arp_packet, sizeof(sr_ethernet_hdr_t) + sizeof(sr_arp_hdr_t), matched_interface->name);
+
+    arpreq->sent = time(NULL);
+    arpreq->times_sent = arpreq->times_sent + 1;
+
 }
 
 /* You should not need to touch the rest of this code. */
