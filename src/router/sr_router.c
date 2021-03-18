@@ -155,45 +155,45 @@ struct sr_if* longest_prefix_match(struct sr_instance* sr, uint32_t dest_ip){
     return sr_get_interface(sr, curr_match->interface);
 }
 
-void handle_ip_forwarding(struct sr_instance* sr,
-                          uint8_t * packet/* lent */,
-                          unsigned int len,
-                          char* interface/* lent */)
-{
-    sr_ethernet_hdr_t *ethernet_header = (sr_ethernet_hdr_t*) packet;
-    sr_ip_hdr_t *ip_header = (sr_ip_hdr_t*) (packet + sizeof(sr_ethernet_hdr_t));
-    struct sr_if* current_interface = sr_get_interface(sr, interface);
-    
-    struct sr_if *matched_interface = longest_prefix_match(sr, ip_header->ip_dst);
-    
-    // No matched entry in routing table
-    if(matched_interface == NULL ){
-        fprintf(stderr, "Not in route table \n");
-        sr_send_icmp_t3(sr, packet, 0x03, 0x00, current_interface);
-        return;
-    }
-    
-    struct sr_arpentry * entry = sr_arpcache_lookup(&sr->cache, ip_header->ip_dst);
-    
-    // If correspond MAC is in cache
-    if(entry != NULL){
-        memcpy(ethernet_header->ether_shost, matched_interface->addr, ETHER_ADDR_LEN);
-        memcpy(ethernet_header->ether_dhost, entry->mac, ETHER_ADDR_LEN);
-
-        ip_header->ip_sum = 0;
-        ip_header->ip_sum = cksum(ip_header, sizeof(sr_ip_hdr_t));
-                
-        sr_send_packet(sr, packet, len, matched_interface->name);
-        return;
-    }
-    
-    /* we need to put the packet on the queue */
-    struct sr_arpreq* arpreq = sr_arpcache_queuereq(&sr->cache, ip_header->ip_dst, packet, len, matched_interface->name);
-    /* call handle arp request method */
-    handle_arpreq(sr, arpreq);
-    return;
-    
-}
+//void handle_ip_forwarding(struct sr_instance* sr,
+//                          uint8_t * packet/* lent */,
+//                          unsigned int len,
+//                          char* interface/* lent */)
+//{
+//    sr_ethernet_hdr_t *ethernet_header = (sr_ethernet_hdr_t*) packet;
+//    sr_ip_hdr_t *ip_header = (sr_ip_hdr_t*) (packet + sizeof(sr_ethernet_hdr_t));
+//    struct sr_if* current_interface = sr_get_interface(sr, interface);
+//
+//    struct sr_if *matched_interface = longest_prefix_match(sr, ip_header->ip_dst);
+//
+//    // No matched entry in routing table
+//    if(matched_interface == NULL ){
+//        fprintf(stderr, "Not in route table \n");
+//        sr_send_icmp_t3(sr, packet, 0x03, 0x00, current_interface);
+//        return;
+//    }
+//
+//    struct sr_arpentry * entry = sr_arpcache_lookup(&sr->cache, ip_header->ip_dst);
+//
+//    // If correspond MAC is in cache
+//    if(entry != NULL){
+//        memcpy(ethernet_header->ether_shost, matched_interface->addr, ETHER_ADDR_LEN);
+//        memcpy(ethernet_header->ether_dhost, entry->mac, ETHER_ADDR_LEN);
+//
+//        ip_header->ip_sum = 0;
+//        ip_header->ip_sum = cksum(ip_header, sizeof(sr_ip_hdr_t));
+//
+//        sr_send_packet(sr, packet, len, matched_interface->name);
+//        return;
+//    }
+//
+//    /* we need to put the packet on the queue */
+//    struct sr_arpreq* arpreq = sr_arpcache_queuereq(&sr->cache, ip_header->ip_dst, packet, len, matched_interface->name);
+//    /* call handle arp request method */
+//    handle_arpreq(sr, arpreq);
+//    return;
+//
+//}
 
 void handle_arp(struct sr_instance* sr,
                 uint8_t * packet/* lent */,
@@ -292,9 +292,9 @@ void handle_ip(struct sr_instance* sr,
                 unsigned int len,
                char* interface/* lent */){
     
-    //sr_ethernet_hdr_t *ethernet_header = (sr_ethernet_hdr_t*) packet;
+    sr_ethernet_hdr_t *ethernet_header = (sr_ethernet_hdr_t*) packet;
     sr_ip_hdr_t *ip_header = (sr_ip_hdr_t*) (packet + sizeof(sr_ethernet_hdr_t));
-    //struct sr_if* current_interface = sr_get_interface(sr, interface);
+    struct sr_if* current_interface = sr_get_interface(sr, interface);
     
     if(len < sizeof(sr_ethernet_hdr_t)+sizeof(sr_ip_hdr_t)) {
       fprintf(stderr, "IP packet: too small. Drop it! \n");
@@ -308,7 +308,7 @@ void handle_ip(struct sr_instance* sr,
     
     
     if(old_check_sum != ip_header->ip_sum){
-        fprintf(stderr, "Dropping IP packet: Invalid checksum \n");
+        fprintf(stderr, "Invalid checksum. Drop it! \n");
         return;
     }
     
@@ -370,7 +370,31 @@ void handle_ip(struct sr_instance* sr,
     ip_header->ip_sum = 0;
     ip_header->ip_sum = cksum(ip_header, sizeof(sr_ip_hdr_t));
     
-    handle_ip_forwarding(sr, packet, len, interface);
+    struct sr_if *matched_interface = longest_prefix_match(sr, ip_header->ip_dst);
+    
+    // No matched entry in routing table
+    if(matched_interface == NULL ){
+        fprintf(stderr, "Not in route table \n");
+        sr_send_icmp_t3(sr, packet, 0x03, 0x00, current_interface);
+        return;
+    }
+    
+    struct sr_arpentry * entry = sr_arpcache_lookup(&sr->cache, ip_header->ip_dst);
+    
+    // If correspond MAC is in cache
+    if(entry != NULL){
+        memcpy(ethernet_header->ether_shost, matched_interface->addr, ETHER_ADDR_LEN);
+        memcpy(ethernet_header->ether_dhost, entry->mac, ETHER_ADDR_LEN);
+                
+        sr_send_packet(sr, packet, len, matched_interface->name);
+        return;
+    }
+    
+    // Put it into the Queue
+    struct sr_arpreq* arpreq = sr_arpcache_queuereq(&sr->cache, ip_header->ip_dst, packet, len, matched_interface->name);
+    //  Send the arp request
+    handle_arpreq(sr, arpreq);
+    return;
 }
 
 /*---------------------------------------------------------------------

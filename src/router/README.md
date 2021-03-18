@@ -1,8 +1,8 @@
 # README for Assignment 2: Router
 
-Name:
+Name: Siyang Piao
 
-JHED:
+JHED: spiao2
 
 ---
 
@@ -15,3 +15,5 @@ Some guiding questions:
 - What helper method did you write (and why)?
 - What logic did you implement in each file/method?
 - What problems or challenges did you encounter?
+
+In this assignment, I have modified 3 files.

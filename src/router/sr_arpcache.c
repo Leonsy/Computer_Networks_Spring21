@@ -41,7 +41,7 @@ void handle_arpreq(struct sr_instance *sr, struct sr_arpreq *arpreq) {
         while(packet_waiting)
         {
             struct sr_if* iface = sr_get_interface(sr, packet_waiting->iface);
-            sr_send_icmp_t3(sr, packet_waiting->buf, 0x03, 0x00, iface);
+            sr_send_icmp_t3(sr, packet_waiting->buf, 0x03, 0x01, iface);
             packet_waiting = packet_waiting->next;
         }
         sr_arpreq_destroy(&sr->cache, arpreq);
