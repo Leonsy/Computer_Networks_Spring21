@@ -270,22 +270,24 @@ void handle_ip(struct sr_instance* sr,
       return;
     }
     
-    struct sr_if* if_i = sr->if_list;
-    struct sr_if* matched_if = NULL;
-    // Find if the request is targesting one of our interface
-    while(if_i)
-    {
-        // Skip if it is not matched
-        if(ip_header->ip_dst == if_i->ip)
-        {
-            matched_if = if_i;
-            break;
-        }
-        if_i = if_i->next;
-    }
+//    struct sr_if* if_i = sr->if_list;
+//    struct sr_if* matched_if = NULL;
+//    // Find if the request is targesting one of our interface
+//    while(if_i)
+//    {
+//        // Skip if it is not matched
+//        if(ip_header->ip_dst == if_i->ip)
+//        {
+//            matched_if = if_i;
+//            break;
+//        }
+//        if_i = if_i->next;
+//    }
+    
+    struct sr_if *dst_interface = get_interface_from_ip(sr, ip_header->ip_dst);
     
     // For us
-    if(matched_if != NULL){
+    if(dst_interface != NULL){
         // It is not ICMP packet
         if(ip_header->ip_p!=ip_protocol_icmp){
             //Send ICMP port unreachable (type 3, code 3)
