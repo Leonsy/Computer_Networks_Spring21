@@ -194,19 +194,19 @@ void handle_arp(struct sr_instance* sr,
         sr_ethernet_hdr_t* ethernet_header_new = (sr_ethernet_hdr_t*)request_pointer;
         sr_arp_hdr_t*       arp_header_new = (sr_arp_hdr_t*)(request_pointer+sizeof(sr_ethernet_hdr_t));
         
-        ethernet_header_new->ether_type = ethertype_arp;
+        ethernet_header_new->ether_type = ethernet_header->ether_type;
         memcpy(ethernet_header_new->ether_dhost, ethernet_header->ether_shost, ETHER_ADDR_LEN);
         memcpy(ethernet_header_new->ether_shost, receiving_interface->addr, ETHER_ADDR_LEN);
-        
-        arp_header_new->ar_hrd = arp_hrd_ethernet;
-        arp_header_new->ar_pro = ethertype_ip;
+
+        memcpy(arp_header_new->ar_sha, receiving_interface->addr, ETHER_ADDR_LEN);
+        memcpy(arp_header_new->ar_tha, arp_header->ar_sha, ETHER_ADDR_LEN);
+        arp_header_new->ar_hrd = arp_header->ar_hrd;
+        arp_header_new->ar_pro = arp_header->ar_pro;
         arp_header_new->ar_hln = arp_header->ar_hln;
         arp_header_new->ar_pln = arp_header->ar_pln;
-        arp_header_new->ar_op = htons(arp_op_reply);
-        memcpy(arp_header_new->ar_sha, receiving_interface->addr, ETHER_ADDR_LEN);
         arp_header_new->ar_sip = receiving_interface->ip;
-        memcpy(arp_header_new->ar_tha, arp_header->ar_sha, ETHER_ADDR_LEN);
         arp_header_new->ar_tip = arp_header->ar_sip;
+        arp_header_new->ar_op = htons(arp_op_reply);
 
         sr_send_packet(sr, request_pointer, sizeof(sr_ethernet_hdr_t)+sizeof(sr_arp_hdr_t), receiving_interface->name);
         fprintf(stderr, "ARP sent.\n");
