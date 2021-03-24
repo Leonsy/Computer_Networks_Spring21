@@ -192,28 +192,19 @@ void handle_arp(struct sr_instance* sr,
         
         // Insert it to cache, check if there is pending request
         struct sr_arpreq *ar_req = sr_arpcache_insert(&sr->cache, arp_header->ar_sha, arp_header->ar_sip);
-        
-        // If there is no pending request on it, return
-        if(ar_req == NULL){
-            return;
-        }
       
-        struct sr_packet* pending_packet = ar_req->packets;
-        while(pending_packet) {
-            
-            uint8_t* packet_pointer = pending_packet->buf;
-            sr_ethernet_hdr_t* e_hdr_new = (sr_ethernet_hdr_t*)packet_pointer;
-            sr_ip_hdr_t*    ip_hdr_new = (sr_ip_hdr_t*)(packet_pointer+sizeof(sr_ethernet_hdr_t));
+        if(ar_req != NULL){
+            struct sr_packet* pending_packet = ar_req->packets;
+            while(pending_packet) {
+                uint8_t* packet_pointer = pending_packet->buf;
+                sr_ethernet_hdr_t* e_hdr_new = (sr_ethernet_hdr_t*)packet_pointer;
+                sr_ip_hdr_t*    ip_hdr_new = (sr_ip_hdr_t*)(packet_pointer+sizeof(sr_ethernet_hdr_t));
+                memcpy(e_hdr_new->ether_dhost, arp_header->ar_sha, ETHER_ADDR_LEN);
+                memcpy(e_hdr_new->ether_shost, receiving_interface->addr, ETHER_ADDR_LEN);
 
-            memcpy(e_hdr_new->ether_dhost, arp_header->ar_sha, ETHER_ADDR_LEN);
-            memcpy(e_hdr_new->ether_shost, receiving_interface->addr, ETHER_ADDR_LEN);
-
-            ip_hdr_new->ip_sum = 0;
-            ip_hdr_new->ip_sum = cksum(ip_hdr_new, sizeof(sr_ip_hdr_t));
-
-            sr_send_packet(sr, packet_pointer, pending_packet->len, receiving_interface->name);
-
-            pending_packet = pending_packet->next;
+                sr_send_packet(sr, packet_pointer, pending_packet->len, receiving_interface->name);
+                pending_packet = pending_packet->next;
+            }
         }
 
       sr_arpreq_destroy(&(sr->cache), ar_req);
