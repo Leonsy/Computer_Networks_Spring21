@@ -48,23 +48,24 @@ void handle_arpreq(struct sr_instance *sr, struct sr_arpreq *arpreq) {
         
         return;
     }
-    
-    // Send a new ARP request
-    uint8_t* arp_packet = malloc(sizeof(sr_ethernet_hdr_t) + sizeof(sr_arp_hdr_t));
-    sr_ethernet_hdr_t* ethernet_header = (sr_ethernet_hdr_t*)arp_packet;
-    sr_arp_hdr_t* arp_header = (sr_arp_hdr_t*)(arp_packet+ sizeof(sr_ethernet_hdr_t));
-
     struct sr_if* matched_interface = longest_prefix_match(sr, arpreq->ip);
     if(matched_interface == NULL)
     {
         fprintf(stderr, "No matched interface \n");
         return;
     }
+    
+    // Send a new ARP request
+    uint8_t* arp_packet = malloc(sizeof(sr_ethernet_hdr_t) + sizeof(sr_arp_hdr_t));
+    sr_ethernet_hdr_t* ethernet_header = (sr_ethernet_hdr_t*)arp_packet;
+    sr_arp_hdr_t* arp_header = (sr_arp_hdr_t*)(arp_packet+ sizeof(sr_ethernet_hdr_t));
 
     ethernet_header->ether_type = htons(ethertype_arp);
-    memcpy(ethernet_header->ether_dhost, (uint8_t*)"\xff\xff\xff\xff\xff\xff", ETHER_ADDR_LEN);
+    memset(ethernet_header->ether_dhost, 0xFF, ETHER_ADDR_LEN);
     memcpy(ethernet_header->ether_shost, matched_interface->addr, ETHER_ADDR_LEN);
-
+    
+    memcpy(arp_header->ar_sha, matched_interface->addr, ETHER_ADDR_LEN);
+    memset(arp_header->ar_tha, 0x00, ETHER_ADDR_LEN);
     arp_header->ar_hrd = htons(arp_hrd_ethernet);
     arp_header->ar_pro = htons(ethertype_ip);
     arp_header->ar_sip = matched_interface->ip;
@@ -72,11 +73,9 @@ void handle_arpreq(struct sr_instance *sr, struct sr_arpreq *arpreq) {
     arp_header->ar_hln = ETHER_ADDR_LEN;
     arp_header->ar_pln = 4;
     arp_header->ar_op = htons(arp_op_request);
-    memcpy(arp_header->ar_sha, matched_interface->addr, ETHER_ADDR_LEN);
-    memcpy(arp_header->ar_tha, (unsigned char*)"\xff\xff\xff\xff\xff\xff", ETHER_ADDR_LEN);
 
     sr_send_packet(sr, arp_packet, sizeof(sr_ethernet_hdr_t) + sizeof(sr_arp_hdr_t), matched_interface->name);
-
+    free(arp_packet);
     arpreq->sent = time(0);
     arpreq->times_sent = arpreq->times_sent + 1;
 

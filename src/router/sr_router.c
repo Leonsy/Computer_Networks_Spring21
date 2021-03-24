@@ -223,8 +223,8 @@ void handle_arp(struct sr_instance* sr,
         memcpy(arp_header_new->ar_tha, arp_header->ar_sha, ETHER_ADDR_LEN);
         arp_header_new->ar_hrd = arp_header->ar_hrd;
         arp_header_new->ar_pro = arp_header->ar_pro;
-        arp_header_new->ar_hln = arp_header->ar_hln;
-        arp_header_new->ar_pln = arp_header->ar_pln;
+        arp_header_new->ar_hln = ETHER_ADDR_LEN;
+        arp_header_new->ar_pln = 4;
         arp_header_new->ar_sip = receiving_interface->ip;
         arp_header_new->ar_tip = arp_header->ar_sip;
         arp_header_new->ar_op = htons(arp_op_reply);
@@ -269,20 +269,6 @@ void handle_ip(struct sr_instance* sr,
       fprintf(stderr, "We cannot connect to the source \n");
       return;
     }
-    
-//    struct sr_if* if_i = sr->if_list;
-//    struct sr_if* matched_if = NULL;
-//    // Find if the request is targesting one of our interface
-//    while(if_i)
-//    {
-//        // Skip if it is not matched
-//        if(ip_header->ip_dst == if_i->ip)
-//        {
-//            matched_if = if_i;
-//            break;
-//        }
-//        if_i = if_i->next;
-//    }
     
     struct sr_if *dst_interface = get_interface_from_ip(sr, ip_header->ip_dst);
     
