@@ -198,7 +198,6 @@ void handle_arp(struct sr_instance* sr,
             while(pending_packet) {
                 uint8_t* packet_pointer = pending_packet->buf;
                 sr_ethernet_hdr_t* e_hdr_new = (sr_ethernet_hdr_t*)packet_pointer;
-                sr_ip_hdr_t*    ip_hdr_new = (sr_ip_hdr_t*)(packet_pointer+sizeof(sr_ethernet_hdr_t));
                 memcpy(e_hdr_new->ether_dhost, arp_header->ar_sha, ETHER_ADDR_LEN);
                 memcpy(e_hdr_new->ether_shost, receiving_interface->addr, ETHER_ADDR_LEN);
 
@@ -272,26 +271,31 @@ void handle_ip(struct sr_instance* sr,
     }
     
     struct sr_if* if_i = sr->if_list;
-    
+    struct sr_if* matched_if = NULL;
     // Find if the request is targesting one of our interface
     while(if_i)
     {
         // Skip if it is not matched
-        if(ip_header->ip_dst != if_i->ip)
+        if(ip_header->ip_dst == if_i->ip)
         {
-            if_i = if_i->next;
-            continue;
+            matched_if = if_i;
+            break;
         }
-        // For us, but it is not ICMP packet
+        if_i = if_i->next;
+    }
+    
+    // For us
+    if(matched_if != NULL){
+        // It is not ICMP packet
         if(ip_header->ip_p!=ip_protocol_icmp){
             //Send ICMP port unreachable (type 3, code 3)
             fprintf(stderr, "Not ICMP \n");
             sr_send_icmp_t3(sr, packet, 0x03, 0x03, reply_interface);
             return;
         }
-        
+
         sr_icmp_hdr_t *icmp_header = (sr_icmp_hdr_t*)(packet+sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
-        
+
         // We can only handle icmp 8
         if(icmp_header->icmp_type != 0x08)
         {
@@ -303,44 +307,45 @@ void handle_ip(struct sr_instance* sr,
             return;
         }
     }
-    
-    // Handle the case that the request is not for us
-    if(ip_header->ip_ttl <= 1)
-    {
-      // TTL expired
-      sr_send_icmp_t3(sr, packet, 0x0b, 0x00, reply_interface);
-      return;
+    // Not for us
+    else{
+        // Handle the case that the request is not for us
+        if(ip_header->ip_ttl <= 1)
+        {
+          // TTL expired
+          sr_send_icmp_t3(sr, packet, 0x0b, 0x00, reply_interface);
+          return;
+        }
+        
+        ip_header->ip_ttl--;
+        ip_header->ip_sum = 0;
+        ip_header->ip_sum = cksum(ip_header, sizeof(sr_ip_hdr_t));
+        
+        struct sr_if *matched_interface = longest_prefix_match(sr, ip_header->ip_dst);
+        
+        // No matched entry in routing table
+        if(matched_interface == NULL ){
+            fprintf(stderr, "Not in route table \n");
+            sr_send_icmp_t3(sr, packet, 0x03, 0x00, current_interface);
+            return;
+        }
+        
+        struct sr_arpentry * entry = sr_arpcache_lookup(&sr->cache, ip_header->ip_dst);
+        
+        // If correspond MAC is in cache
+        if(entry != NULL){
+            memcpy(ethernet_header->ether_shost, matched_interface->addr, ETHER_ADDR_LEN);
+            memcpy(ethernet_header->ether_dhost, entry->mac, ETHER_ADDR_LEN);
+                    
+            sr_send_packet(sr, packet, len, matched_interface->name);
+            return;
+        }
+        
+        // Put it into the Queue
+        struct sr_arpreq* arpreq = sr_arpcache_queuereq(&sr->cache, ip_header->ip_dst, packet, len, matched_interface->name);
+        //  Send the arp request
+        handle_arpreq(sr, arpreq);
     }
-    
-    ip_header->ip_ttl--;
-    ip_header->ip_sum = 0;
-    ip_header->ip_sum = cksum(ip_header, sizeof(sr_ip_hdr_t));
-    
-    struct sr_if *matched_interface = longest_prefix_match(sr, ip_header->ip_dst);
-    
-    // No matched entry in routing table
-    if(matched_interface == NULL ){
-        fprintf(stderr, "Not in route table \n");
-        sr_send_icmp_t3(sr, packet, 0x03, 0x00, current_interface);
-        return;
-    }
-    
-    struct sr_arpentry * entry = sr_arpcache_lookup(&sr->cache, ip_header->ip_dst);
-    
-    // If correspond MAC is in cache
-    if(entry != NULL){
-        memcpy(ethernet_header->ether_shost, matched_interface->addr, ETHER_ADDR_LEN);
-        memcpy(ethernet_header->ether_dhost, entry->mac, ETHER_ADDR_LEN);
-                
-        sr_send_packet(sr, packet, len, matched_interface->name);
-        return;
-    }
-    
-    // Put it into the Queue
-    struct sr_arpreq* arpreq = sr_arpcache_queuereq(&sr->cache, ip_header->ip_dst, packet, len, matched_interface->name);
-    //  Send the arp request
-    handle_arpreq(sr, arpreq);
-    return;
 }
 
 /*---------------------------------------------------------------------
