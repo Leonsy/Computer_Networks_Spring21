@@ -188,32 +188,7 @@ void handle_arp(struct sr_instance* sr,
 
     uint16_t ARP_OPcode = ntohs(arp_header->ar_op);
     
-    if(ARP_OPcode == arp_op_request) {
-        
-        uint8_t *request_pointer = malloc(sizeof(sr_ethernet_hdr_t)+sizeof(sr_arp_hdr_t));
-        sr_ethernet_hdr_t* ethernet_header_new = (sr_ethernet_hdr_t*)request_pointer;
-        sr_arp_hdr_t*       arp_header_new = (sr_arp_hdr_t*)(request_pointer+sizeof(sr_ethernet_hdr_t));
-        
-        ethernet_header_new->ether_type = ethernet_header->ether_type;
-        memcpy(ethernet_header_new->ether_dhost, ethernet_header->ether_shost, ETHER_ADDR_LEN);
-        memcpy(ethernet_header_new->ether_shost, receiving_interface->addr, ETHER_ADDR_LEN);
-
-        memcpy(arp_header_new->ar_sha, receiving_interface->addr, ETHER_ADDR_LEN);
-        memcpy(arp_header_new->ar_tha, arp_header->ar_sha, ETHER_ADDR_LEN);
-        arp_header_new->ar_hrd = arp_header->ar_hrd;
-        arp_header_new->ar_pro = arp_header->ar_pro;
-        arp_header_new->ar_hln = arp_header->ar_hln;
-        arp_header_new->ar_pln = arp_header->ar_pln;
-        arp_header_new->ar_sip = receiving_interface->ip;
-        arp_header_new->ar_tip = arp_header->ar_sip;
-        arp_header_new->ar_op = htons(arp_op_reply);
-
-        sr_send_packet(sr, request_pointer, sizeof(sr_ethernet_hdr_t)+sizeof(sr_arp_hdr_t), receiving_interface->name);
-        fprintf(stderr, "ARP sent.\n");
-        free(request_pointer);
-    }
-
-    else if(ARP_OPcode == arp_op_reply) {
+    if(ARP_OPcode == arp_op_reply) {
         
         // Insert it to cache, check if there is pending request
         struct sr_arpreq *ar_req = sr_arpcache_insert(&sr->cache, arp_header->ar_sha, arp_header->ar_sip);
@@ -242,6 +217,31 @@ void handle_arp(struct sr_instance* sr,
         }
 
       sr_arpreq_destroy(&(sr->cache), ar_req);
+    }
+    
+    if(ARP_OPcode == arp_op_request) {
+        
+        uint8_t *request_pointer = malloc(sizeof(sr_ethernet_hdr_t)+sizeof(sr_arp_hdr_t));
+        sr_ethernet_hdr_t* ethernet_header_new = (sr_ethernet_hdr_t*)request_pointer;
+        sr_arp_hdr_t*       arp_header_new = (sr_arp_hdr_t*)(request_pointer+sizeof(sr_ethernet_hdr_t));
+        
+        ethernet_header_new->ether_type = ethernet_header->ether_type;
+        memcpy(ethernet_header_new->ether_dhost, ethernet_header->ether_shost, ETHER_ADDR_LEN);
+        memcpy(ethernet_header_new->ether_shost, receiving_interface->addr, ETHER_ADDR_LEN);
+
+        memcpy(arp_header_new->ar_sha, receiving_interface->addr, ETHER_ADDR_LEN);
+        memcpy(arp_header_new->ar_tha, arp_header->ar_sha, ETHER_ADDR_LEN);
+        arp_header_new->ar_hrd = arp_header->ar_hrd;
+        arp_header_new->ar_pro = arp_header->ar_pro;
+        arp_header_new->ar_hln = arp_header->ar_hln;
+        arp_header_new->ar_pln = arp_header->ar_pln;
+        arp_header_new->ar_sip = receiving_interface->ip;
+        arp_header_new->ar_tip = arp_header->ar_sip;
+        arp_header_new->ar_op = htons(arp_op_reply);
+
+        sr_send_packet(sr, request_pointer, sizeof(sr_ethernet_hdr_t)+sizeof(sr_arp_hdr_t), receiving_interface->name);
+        fprintf(stderr, "ARP sent.\n");
+        free(request_pointer);
     }
 }
 
